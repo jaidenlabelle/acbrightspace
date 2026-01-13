@@ -1,58 +1,247 @@
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.select import Select
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.remote.shadowroot import ShadowRoot
 import pyotp
 import logging
 
 logger = logging.getLogger(__name__)
 
-class Brightspace():
-    """Class to interact with Algonquin College Brightspace using Selenium WebDriver."""
+@dataclass
+class Course:
+    """Represents a course in Brightspace."""
 
+    code: str
+    """Unique code of the course."""
+
+    name: str
+    """Name of the course, without the code."""
+
+    start_date: datetime
+    """Start date and time of the course."""
+    
+    end_date: datetime
+    """End date and time of the course."""
+
+    is_active: bool
+    """Indicates if the course is currently active."""
+
+@dataclass
+class GradeItem:
+    """Represents a grade for an assignment in Brightspace."""
+
+    name: str
+    """Name of the grade item."""
+
+    points_achieved: float
+    """Points received for the assignment."""
+
+    weight_achieved: float
+    """Weight achieved for the assignment."""
+
+    max_points: float
+    """Maximum possible points for the assignment."""
+
+    max_weight: float
+    """Maximum weight for the assignment."""
+
+    grade: float
+    """Percentage grade for the assignment (0-100)."""
+
+    comments: str
+    """Comments provided for the assignment."""
+
+@dataclass
+class Announcement:
+    """Represents an announcement in Brightspace."""
+
+    title: str
+    """Title of the announcement."""
+
+    content: str
+    """Content/body of the announcement."""
+
+    start_date: datetime
+    """Date and time when the announcement was posted."""
+
+@dataclass
+class Assignment:
+    """Represents an assignment in Brightspace."""
+
+    title: str
+    """Title of the assignment."""
+
+    completion_status: str
+    """Completion status of the assignment (e.g., 'Completed', 'Not Submitted')."""
+
+    start_date: datetime
+    """Start date and time of the assignment."""
+
+    due_date: datetime
+    """Due date and time of the assignment."""
+
+    availability_end_date: datetime
+    """End date and time when the assignment is no longer available."""
+
+    description: str
+    """Description of the assignment."""
+
+class BrightspaceError(Exception):
+    """Exception for Brightspace-related errors."""
+
+class Brightspace:
+    """Interface for interacting with Algonquin College Brightspace."""
+    
     def __init__(self):
-        logger.debug("Initializing Brightspace WebDriver")
         self.driver = webdriver.Chrome()
 
-    def quit(self):
-        logger.debug("Quitting Brightspace WebDriver")
-        self.driver.quit()
+    def _get_nested_shadow_root(self, locators: list[tuple[str, str]], root: Any = None) -> ShadowRoot:
+        """Helper method to traverse nested shadow DOMs.
 
-    def login(self, username, password, otp_secret=None):
-        wait = WebDriverWait(self.driver, 10)  # wait up to 10 seconds
+        Args:
+            locators (list[tuple[str, str]]): List of (By, selector) tuples to traverse.
 
-        self.driver.get("https://brightspace.algonquincollege.com")
-        
-        username_field = wait.until(
-            EC.presence_of_element_located((By.NAME, "loginfmt"))
-        )
+        Returns:
+            The final shadow root WebElement.
 
-        username_field.send_keys(username)
-        username_field.send_keys(Keys.RETURN)
+        Example:
+            >>> shadow_root = self._get_nested_shadow_root([
+            ...     (By.CSS_SELECTOR, "parent-element"),
+            ...     (By.CSS_SELECTOR, "child-element"),
+            ...     (By.CSS_SELECTOR, "target-element")
+            ... ])
+        """
+        root = root or self.driver
+        for locator in locators:
+            element = WebDriverWait(root, 10).until(
+                expected_conditions.presence_of_element_located(locator)
+            )
+            root = element.shadow_root
+        return root
 
-        password_field = wait.until(
-            EC.presence_of_element_located((By.ID, "passwordInput"))
-        )
+    def login(self, username: str, password: str, totp_secret: str) -> None:
+        """Logs into Brightspace with the provided credentials.
 
-        password_field.send_keys(password)
-        password_field.send_keys(Keys.RETURN)
+        Args:
+            username (str): The Algonquin College email address for the student.
+            password (str): The password for the Algonquin College student.
+            totp_secret (str): The TOTP secret for two-factor authentication.
 
-        otc_field = wait.until(
-            EC.presence_of_element_located((By.NAME, "otc"))
-        )
+        Raises:
+            BrightspaceError: If the username field is not found.
+            BrightspaceError: If the password field is not found.
+            BrightspaceError: If the TOTP field is not found.
+            BrightspaceError: If any error occurs during the login process.
+        """
 
-        otp = pyotp.TOTP(otp_secret)
+        try:
+            # Wait up to 10 seconds for elements to load
+            wait = WebDriverWait(self.driver, 10)
 
-        otc_field.send_keys(otp.now())
-        otc_field.send_keys(Keys.RETURN)
-        
+            # Navigate to the Brightspace login page
+            self.driver.get("https://brightspace.algonquincollege.com/")
 
-    def logout(self):
-        raise NotImplementedError("Logout method not implemented yet.")
+            # Enter username
+            try:
+                logger.debug("Waiting for username field to be present.")
+                username_field = wait.until(
+                    expected_conditions.presence_of_element_located((By.NAME, "loginfmt"))
+                )
+            except TimeoutException as error:
+                # Username field not found, likely due to page load issues
+                raise BrightspaceError("Email/username entry field not found.") from error
+            logger.debug("Username field found, entering username.")
+            username_field.send_keys(username)
+            username_field.send_keys(Keys.RETURN)
+
+            # Now the page should redirect to the password entry,
+            # wait for it and then enter the password
+            try:
+                logger.debug("Waiting for password field to be present.")
+                password_field = wait.until(
+                    expected_conditions.presence_of_element_located((By.ID, "passwordInput"))
+                )
+            except TimeoutException as error:
+                # Password field not found, likely due to incorrect email/username
+                raise BrightspaceError("Password entry field not found. Check that username matches your Algonquin College email address.") from error
+            logger.debug("Password field found, entering password.")
+            password_field.send_keys(password)
+            password_field.send_keys(Keys.RETURN)
+
+            # Now the page should redirect to the TOTP entry,
+            # wait for it and then enter the TOTP code generated from the secret
+            try:
+                logger.debug("Waiting for TOTP field to be present.")
+                totp_field = wait.until(
+                    expected_conditions.presence_of_element_located((By.NAME, "otc"))
+                )
+            except TimeoutException as error:
+                # TOTP is currently required to log in
+                raise BrightspaceError("TOTP entry field not found.") from error
+            logger.debug("TOTP field found, generating and entering TOTP code.")
+
+            totp = pyotp.TOTP(totp_secret)
+            totp_code = totp.now() # Generate current TOTP code
+            totp_field.send_keys(totp_code)
+            totp_field.send_keys(Keys.RETURN)
+
+            # Wait for successful login by checking for the URL to change to the Brightspace homepage
+            try:
+                logger.debug("Waiting for successful login redirect.")
+                wait.until(
+                    expected_conditions.url_contains("brightspace.algonquincollege.com/d2l/home")
+                )
+            except TimeoutException as error:
+                raise BrightspaceError("Login failed.") from error
+
+        except Exception as error:
+            raise BrightspaceError("Failed to log in to Brightspace.") from error
     
-    def grades(self):
-        raise NotImplementedError("Grades method not implemented yet.")
-    
-    def assignments(self):
-        raise NotImplementedError("Assignments method not implemented yet.")
+    def get_courses(self) -> list[Course]:
+        """Fetches the list of courses for the logged-in student.
+
+        Returns:
+            list[Course]: A list of Course objects representing the student's courses.
+        """
+        # Navigate to the Brightspace home page
+        self.driver.get("https://brightspace.algonquincollege.com/d2l/home")
+
+        root = self._get_nested_shadow_root([
+            (By.CSS_SELECTOR, "d2l-my-courses"),
+            (By.CSS_SELECTOR, "d2l-my-courses-container"),
+        ])
+
+        tabs = WebDriverWait(root, 10).until(
+            expected_conditions.presence_of_all_elements_located((By.CSS_SELECTOR, "d2l-tab-panel"))
+        )
+
+        courses = []
+
+        for tab in tabs:
+            self.driver.execute_script(
+                "arguments[0].setAttribute('selected', '');", tab
+            )
+
+            inner_root = self._get_nested_shadow_root([
+                (By.CSS_SELECTOR, "d2l-my-courses-content"),
+                (By.CSS_SELECTOR, "d2l-my-courses-card-grid"),
+            ], tab)
+
+            cards = WebDriverWait(inner_root, 10).until(
+                expected_conditions.presence_of_all_elements_located((By.CSS_SELECTOR, "d2l-enrollment-card"))
+            )
+
+            for card in cards:
+                card = WebDriverWait(card.shadow_root, 10).until(
+                    expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "d2l-card"))
+                )
+                
+                print(card.get_attribute("text"))
+
