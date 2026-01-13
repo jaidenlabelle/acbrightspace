@@ -260,7 +260,9 @@ class Brightspace:
                 )
             except TimeoutException as error:
                 raise BrightspaceError("Login failed.") from error
-
+        
+        except BrightspaceError:
+            raise
         except Exception as error:
             raise BrightspaceError("Failed to log in to Brightspace.") from error
     
@@ -314,3 +316,13 @@ class Brightspace:
 
         return courses
 
+    def get_grades(self, course: Course) -> list[GradeItem]:
+        """Fetches the grades for a specific course.
+
+        Args:
+            course (Course): The course for which to fetch grades.
+
+        Returns:
+            list[GradeItem]: A list of GradeItem objects representing the grades for the course.
+        
+        """
