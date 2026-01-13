@@ -391,7 +391,19 @@ class Brightspace:
             print(grade_item)
 
             grades.append(grade_item)
+        
+        return grades
+    
+    def get_assignments(self, url_code: str) -> list[Assignment]:
+        """Fetches the assignments for a specific course.
 
+        Args:
+            course (Course): The course for which to fetch assignments.
+        
+        Returns:
+            list[Assignment]: A list of Assignment objects representing the assignments for the course.
+        """
+        pass
 
 
             
