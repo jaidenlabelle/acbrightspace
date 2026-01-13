@@ -1,6 +1,7 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, List
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -11,6 +12,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.shadowroot import ShadowRoot
 import pyotp
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +26,8 @@ class Course:
     name: str
     """Name of the course, without the code."""
 
-    start_date: datetime
-    """Start date and time of the course."""
+    semester: str
+    """Semester in which the course is offered."""
     
     end_date: datetime
     """End date and time of the course."""
@@ -125,6 +127,64 @@ class Brightspace:
             )
             root = element.shadow_root
         return root
+
+    def _create_course_from_text(self, text: str) -> Course | None:
+        """Parses course information from text and creates a Course object.
+
+        Args:
+            text (str): The text containing course information.
+        
+        Returns:
+            Course: The created Course object.
+        """
+
+        match = re.match(r"^(Closed, )?(?:.*?) (.*?), (.*?), (.*?), (.*?,.*)$", text)
+        if not match:
+            logger.warning("Failed to parse course information from text: %s", text)
+            return None
+        
+        is_active = match.group(1) is None
+        name = match.group(2)
+        code = match.group(3)
+        semester = match.group(4)
+        # Ends April 27, 2026 at 12:00 AM
+        # Ended December 16, 2024 at 12:00 AM
+        #end_date_str = match.group(5)
+        #end_date = datetime.strptime(end_date_str, "%B %d, %Y, %I:%M %p")
+        end_date = datetime.now()  # Placeholder until parsing is fixed
+
+        return Course(
+            code=code,
+            name=name,
+            semester=semester,
+            end_date=end_date,
+            is_active=is_active
+        )
+
+    def _display_course_tree(self, courses: List[Course]) -> None:
+        """Displays the course information in a tree structure directory style.
+
+        Args:
+            courses (List[Course]): List of Course objects to display.
+
+            |
+            `-- Semester
+                |-- Course Name (Course Code) 
+        """
+        # Group courses by semester
+        semester_dict = defaultdict(list)
+        for course in courses:
+            semester_dict[course.semester].append(course)
+
+        # Sort semesters chronologically (optional)
+        sorted_semesters = sorted(semester_dict.keys())
+
+        print("|")
+        for semester in sorted_semesters:
+            print(f"`-- {semester}")
+            for course in semester_dict[semester]:
+                print(f"    |-- {course.name} ({course.code})")
+        
 
     def login(self, username: str, password: str, totp_secret: str) -> None:
         """Logs into Brightspace with the provided credentials.
@@ -244,4 +304,13 @@ class Brightspace:
                 )
                 
                 print(card.get_attribute("text"))
+                course = self._create_course_from_text(card.get_attribute("text"))
+                if course is not None:
+                    # Avoid duplicate course codes
+                    if all(existing_course.code != course.code for existing_course in courses):
+                        courses.append(course)
+
+        self._display_course_tree(courses)
+
+        return courses
 
