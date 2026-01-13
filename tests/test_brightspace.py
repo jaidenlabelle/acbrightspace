@@ -36,8 +36,12 @@ def test_login_success(brightspace):
         ]
         
         brightspace.login("test@algonquincollege.com", "password123", "secret")
-        
-        assert brightspace.driver.get.called
+
+        # Verify that the fields were used with the correct values
+        mock_username_field.send_keys.assert_any_call("test@algonquincollege.com")
+        mock_password_field.send_keys.assert_any_call("password123")
+        mock_totp_field.send_keys.assert_any_call("123456")
+
 
 
 def test_login_username_field_not_found(brightspace):
@@ -114,3 +118,4 @@ def test_login_general_exception(brightspace):
     with patch('acbrightspace.brightspace.WebDriverWait', side_effect=Exception("Unexpected error")):
         with pytest.raises(BrightspaceError, match="Failed to log in to Brightspace"):
             brightspace.login("test@algonquincollege.com", "password123", "secret")
+

@@ -35,6 +35,9 @@ class Course:
     is_active: bool
     """Indicates if the course is currently active."""
 
+    url_code: str
+    """Code used in the URL to access the course."""
+
 @dataclass
 class GradeItem:
     """Represents a grade for an assignment in Brightspace."""
@@ -128,7 +131,7 @@ class Brightspace:
             root = element.shadow_root
         return root
 
-    def _create_course_from_text(self, text: str) -> Course | None:
+    def _create_course_from_text(self, text: str, url_code: str) -> Course | None:
         """Parses course information from text and creates a Course object.
 
         Args:
@@ -158,7 +161,8 @@ class Brightspace:
             name=name,
             semester=semester,
             end_date=end_date,
-            is_active=is_active
+            is_active=is_active,
+            url_code=url_code
         )
 
     def _display_course_tree(self, courses: List[Course]) -> None:
@@ -306,7 +310,7 @@ class Brightspace:
                 )
                 
                 print(card.get_attribute("text"))
-                course = self._create_course_from_text(card.get_attribute("text"))
+                course = self._create_course_from_text(card.get_attribute("text"), url_code=card.get_attribute("href").split('/')[-1])
                 if course is not None:
                     # Avoid duplicate course codes
                     if all(existing_course.code != course.code for existing_course in courses):
@@ -316,7 +320,7 @@ class Brightspace:
 
         return courses
 
-    def get_grades(self, course: Course) -> list[GradeItem]:
+    def get_grades(self, url_code: str) -> list[GradeItem]:
         """Fetches the grades for a specific course.
 
         Args:
@@ -326,3 +330,69 @@ class Brightspace:
             list[GradeItem]: A list of GradeItem objects representing the grades for the course.
         
         """
+
+        # Navigate to the course grades page
+        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou={url_code}")
+
+        grades = []
+
+        # Wait for the grades table to load
+        grades_table = WebDriverWait(self.driver, 10).until(
+            expected_conditions.presence_of_element_located((By.ID, "z_f"))  # Replace with actual table ID
+        )
+
+        # Get all rows
+        all_rows = grades_table.find_elements(By.TAG_NAME, "tr")
+
+        # Process all rows after header
+        for row in all_rows[1:]:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            name = row.find_element(By.TAG_NAME, "th").text.strip()
+
+            spans = row.find_elements(By.TAG_NAME, "span")
+
+            if len(spans) < 2:
+                logger.warning("Unexpected format for grade item: %s", name)
+                continue
+
+            # Get points acheived and max points
+            try:
+                points = spans[0].text.strip()
+                points_achieved, max_points = map(float, points.split(" / "))
+            except ValueError:
+                logger.warning("Failed to parse points for grade item: %s", name)
+                points_achieved, max_points = 0.0, 0.0
+
+            # Get weight acheived and max weight
+            try:
+                weight = spans[1].text.strip()
+                weight_achieved, max_weight = map(float, weight.split(" / "))
+            except ValueError:
+                logger.warning("Failed to parse weight for grade item: %s", name)
+                weight_achieved, max_weight = 0.0, 0.0
+            
+            # Calculate grade percentage, round to 2 decimal places
+            grade = round((points_achieved / max_points * 100) if max_points > 0 else 0.0, 2)
+        
+            
+            # Get comments
+            comments = cells[4].text.strip()
+
+            grade_item = GradeItem(
+                name=name,
+                points_achieved=points_achieved,
+                weight_achieved=weight_achieved,
+                max_points=max_points,
+                max_weight=max_weight,
+                grade=grade,
+                comments=comments
+            )
+
+            print(grade_item)
+
+            grades.append(grade_item)
+
+
+
+            
+
