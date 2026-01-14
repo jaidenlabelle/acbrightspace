@@ -1,5 +1,3 @@
-from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List
 from selenium import webdriver
@@ -12,91 +10,10 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.shadowroot import ShadowRoot
 import pyotp
 import logging
-import re
+from acbrightspace.course import Course
+from acbrightspace.grade_item import GradeItem
 
 logger = logging.getLogger(__name__)
-
-@dataclass
-class Course:
-    """Represents a course in Brightspace."""
-
-    code: str
-    """Unique code of the course."""
-
-    name: str
-    """Name of the course, without the code."""
-
-    semester: str
-    """Semester in which the course is offered."""
-    
-    end_date: datetime
-    """End date and time of the course."""
-
-    is_active: bool
-    """Indicates if the course is currently active."""
-
-    url_code: str
-    """Code used in the URL to access the course."""
-
-@dataclass
-class GradeItem:
-    """Represents a grade for an assignment in Brightspace."""
-
-    name: str
-    """Name of the grade item."""
-
-    points_achieved: float
-    """Points received for the assignment."""
-
-    weight_achieved: float
-    """Weight achieved for the assignment."""
-
-    max_points: float
-    """Maximum possible points for the assignment."""
-
-    max_weight: float
-    """Maximum weight for the assignment."""
-
-    grade: float
-    """Percentage grade for the assignment (0-100)."""
-
-    comments: str
-    """Comments provided for the assignment."""
-
-@dataclass
-class Announcement:
-    """Represents an announcement in Brightspace."""
-
-    title: str
-    """Title of the announcement."""
-
-    content: str
-    """Content/body of the announcement."""
-
-    start_date: datetime
-    """Date and time when the announcement was posted."""
-
-@dataclass
-class Assignment:
-    """Represents an assignment in Brightspace."""
-
-    title: str
-    """Title of the assignment."""
-
-    completion_status: str
-    """Completion status of the assignment (e.g., 'Completed', 'Not Submitted')."""
-
-    start_date: datetime
-    """Start date and time of the assignment."""
-
-    due_date: datetime
-    """Due date and time of the assignment."""
-
-    availability_end_date: datetime
-    """End date and time when the assignment is no longer available."""
-
-    description: str
-    """Description of the assignment."""
 
 class BrightspaceError(Exception):
     """Exception for Brightspace-related errors."""
@@ -130,65 +47,6 @@ class Brightspace:
             )
             root = element.shadow_root
         return root
-
-    def _create_course_from_text(self, text: str, url_code: str) -> Course | None:
-        """Parses course information from text and creates a Course object.
-
-        Args:
-            text (str): The text containing course information.
-        
-        Returns:
-            Course: The created Course object.
-        """
-
-        match = re.match(r"^(Closed, )?(?:.*?) (.*?), (.*?), (.*?), (.*?,.*)$", text)
-        if not match:
-            logger.warning("Failed to parse course information from text: %s", text)
-            return None
-        
-        is_active = match.group(1) is None
-        name = match.group(2)
-        code = match.group(3)
-        semester = match.group(4)
-        # Ends April 27, 2026 at 12:00 AM
-        # Ended December 16, 2024 at 12:00 AM
-        #end_date_str = match.group(5)
-        #end_date = datetime.strptime(end_date_str, "%B %d, %Y, %I:%M %p")
-        end_date = datetime.now()  # Placeholder until parsing is fixed
-
-        return Course(
-            code=code,
-            name=name,
-            semester=semester,
-            end_date=end_date,
-            is_active=is_active,
-            url_code=url_code
-        )
-
-    def _display_course_tree(self, courses: List[Course]) -> None:
-        """Displays the course information in a tree structure directory style.
-
-        Args:
-            courses (List[Course]): List of Course objects to display.
-
-            |
-            `-- Semester
-                |-- Course Name (Course Code) 
-        """
-        # Group courses by semester
-        semester_dict = defaultdict(list)
-        for course in courses:
-            semester_dict[course.semester].append(course)
-
-        # Sort semesters chronologically (optional)
-        sorted_semesters = sorted(semester_dict.keys())
-
-        print("|")
-        for semester in sorted_semesters:
-            print(f"`-- {semester}")
-            for course in semester_dict[semester]:
-                print(f"    |-- {course.name} ({course.code})")
-        
 
     def login(self, username: str, password: str, totp_secret: str) -> None:
         """Logs into Brightspace with the provided credentials.
@@ -310,29 +168,26 @@ class Brightspace:
                 )
                 
                 print(card.get_attribute("text"))
-                course = self._create_course_from_text(card.get_attribute("text"), url_code=card.get_attribute("href").split('/')[-1])
+                course = Course.from_string(card.get_attribute("text"), org_unit_id=int(card.get_attribute("href").split('/')[-1]))
                 if course is not None:
                     # Avoid duplicate course codes
-                    if all(existing_course.code != course.code for existing_course in courses):
+                    if all(existing_course.full_code != course.full_code for existing_course in courses):
                         courses.append(course)
-
-        self._display_course_tree(courses)
 
         return courses
 
-    def get_grades(self, url_code: str) -> list[GradeItem]:
+    def get_grades(self, org_unit_id: str) -> list[GradeItem]:
         """Fetches the grades for a specific course.
 
         Args:
-            course (Course): The course for which to fetch grades.
-
+            org_unit_id (str): The organizational unit ID for the course for which to fetch grades.
         Returns:
             list[GradeItem]: A list of GradeItem objects representing the grades for the course.
         
         """
 
         # Navigate to the course grades page
-        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou={url_code}")
+        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou={org_unit_id}")
 
         grades = []
 
@@ -394,11 +249,11 @@ class Brightspace:
         
         return grades
     
-    def get_assignments(self, url_code: str) -> list[Assignment]:
+    def get_assignments(self, org_unit_id: str) -> list[Assignment]:
         """Fetches the assignments for a specific course.
 
         Args:
-            course (Course): The course for which to fetch assignments.
+            org_unit_id (str): The organizational unit ID for the course for which to fetch assignments.
         
         Returns:
             list[Assignment]: A list of Assignment objects representing the assignments for the course.

@@ -2,13 +2,13 @@ import pytest
 from acbrightspace.semester import Semester
 
 valid_semester_names = [
-    ("Winter 2026", "Winter", 2026),
-    ("Fall 2025", "Fall", 2025),
-    ("Spring 2025", "Spring", 2025),
-    ("Winter 2025", "Winter", 2025),
-    ("Fall 2024", "Fall", 2024),
-    ("Spring 2024", "Spring", 2024),
-    ("Winter 2024", "Winter", 2024),
+    ("2026 Winter", "Winter", 2026),
+    ("2025 Fall", "Fall", 2025),
+    ("2025 Spring", "Spring", 2025),
+    ("2025 Winter", "Winter", 2025),
+    ("2024 Fall", "Fall", 2024),
+    ("2024 Spring", "Spring", 2024),
+    ("2024 Winter", "Winter", 2024),
 ]
 
 valid_semester_codes = [
