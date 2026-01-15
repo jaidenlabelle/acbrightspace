@@ -8,10 +8,13 @@ from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.select import Select
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.shadowroot import ShadowRoot
+from selenium.webdriver.remote.webelement import WebElement
 import pyotp
 import logging
 from acbrightspace.course import Course
+from acbrightspace.fraction import Fraction
 from acbrightspace.grade_item import GradeItem
+from acbrightspace.table import Table
 
 logger = logging.getLogger(__name__)
 
@@ -189,77 +192,44 @@ class Brightspace:
         # Navigate to the course grades page
         self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou={org_unit_id}")
 
-        grades = []
-
         # Wait for the grades table to load
         grades_table = WebDriverWait(self.driver, 10).until(
             expected_conditions.presence_of_element_located((By.ID, "z_f"))  # Replace with actual table ID
         )
 
-        # Get all rows
-        all_rows = grades_table.find_elements(By.TAG_NAME, "tr")
+        table = Table()
+        parsed_table = table.parse(grades_table)
 
-        # Process all rows after header
-        for row in all_rows[1:]:
-            cells = row.find_elements(By.TAG_NAME, "td")
-            name = row.find_element(By.TAG_NAME, "th").text.strip()
+        grades = []
+        for index, row in enumerate(parsed_table):
+            try:
+                # Skip rows that don't have enough columns
+                if len(row) < 5:
+                    logger.warning("Skipping row with insufficient columns: %s", row)
+                    continue
 
-            spans = row.find_elements(By.TAG_NAME, "span")
+                # Parse grade item details
+                name = row[0]
+                points = row[1] or None
+                weight = row[2] or None
+                comments = row[4] or None
 
-            if len(spans) < 2:
-                logger.warning("Unexpected format for grade item: %s", name)
+                # Assert correct types
+                assert isinstance(name, str)
+                assert isinstance(points, Fraction) or points is None
+                assert isinstance(weight, Fraction) or weight is None
+                assert isinstance(comments, str) or comments is None
+
+                grade_item = GradeItem(
+                    name=name,
+                    points=points,
+                    weight=weight,
+                    comments=comments
+                )
+
+                grades.append(grade_item)
+
+            except Exception as error:
+                logger.error("Error processing row %d: %s", index, row, exc_info=error)
                 continue
-
-            # Get points acheived and max points
-            try:
-                points = spans[0].text.strip()
-                points_achieved, max_points = map(float, points.split(" / "))
-            except ValueError:
-                logger.warning("Failed to parse points for grade item: %s", name)
-                points_achieved, max_points = 0.0, 0.0
-
-            # Get weight acheived and max weight
-            try:
-                weight = spans[1].text.strip()
-                weight_achieved, max_weight = map(float, weight.split(" / "))
-            except ValueError:
-                logger.warning("Failed to parse weight for grade item: %s", name)
-                weight_achieved, max_weight = 0.0, 0.0
-            
-            # Calculate grade percentage, round to 2 decimal places
-            grade = round((points_achieved / max_points * 100) if max_points > 0 else 0.0, 2)
-        
-            
-            # Get comments
-            comments = cells[4].text.strip()
-
-            grade_item = GradeItem(
-                name=name,
-                points_achieved=points_achieved,
-                weight_achieved=weight_achieved,
-                max_points=max_points,
-                max_weight=max_weight,
-                grade=grade,
-                comments=comments
-            )
-
-            print(grade_item)
-
-            grades.append(grade_item)
-        
         return grades
-    
-    def get_assignments(self, org_unit_id: str) -> list[Assignment]:
-        """Fetches the assignments for a specific course.
-
-        Args:
-            org_unit_id (str): The organizational unit ID for the course for which to fetch assignments.
-        
-        Returns:
-            list[Assignment]: A list of Assignment objects representing the assignments for the course.
-        """
-        pass
-
-
-            
-

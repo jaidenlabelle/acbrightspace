@@ -20,6 +20,9 @@ class Fraction:
 
         Returns:
             A Fraction object.
+
+        Raises:
+            ValueError: If the string is not a valid fraction format.
         """
         try:
             numerator_str, denominator_str = fraction_str.split("/")

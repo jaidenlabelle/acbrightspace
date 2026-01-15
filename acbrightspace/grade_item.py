@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from acbrightspace.fraction import Fraction
+
 
 @dataclass
 class GradeItem:
@@ -8,20 +10,11 @@ class GradeItem:
     name: str
     """Name of the grade item."""
 
-    points_achieved: float
-    """Points received for the assignment."""
+    points: Fraction | None
+    """Points achieved for the assignment."""
 
-    weight_achieved: float
-    """Weight achieved for the assignment."""
+    weight: Fraction | None
+    """Weight of the assignment in the overall course grade."""
 
-    max_points: float
-    """Maximum possible points for the assignment."""
-
-    max_weight: float
-    """Maximum weight for the assignment."""
-
-    grade: float
-    """Percentage grade for the assignment (0-100)."""
-
-    comments: str
+    comments: str | None
     """Comments provided for the assignment."""
