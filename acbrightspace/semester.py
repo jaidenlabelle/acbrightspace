@@ -1,3 +1,9 @@
+TERMS = {
+    "W": "Winter",
+    "S": "Spring",
+    "F": "Fall",
+}
+
 class Semester:
     """Represents a semester in Brightspace."""
 
@@ -15,11 +21,9 @@ class Semester:
     @property
     def code(self) -> str:
         """Returns the unique code of the semester (e.g., "26W")."""
-        term_map = {
-            "Winter": "W",
-            "Spring": "S",
-            "Fall": "F",
-        }
+
+        # Reverse the TERMS mapping to get term character from term name
+        term_map = {v: k for k, v in TERMS.items()}
         year_suffix = str(self.year)[-2:]
         term_char = term_map[self.term]
         return f"{year_suffix}{term_char}"
@@ -30,7 +34,9 @@ class Semester:
             raise ValueError(f"Year must be a positive integer, got: {year}")
         
         # Validate term
-        valid_terms = {"Winter", "Spring", "Fall"}
+        # Get valid terms from TERMS values
+        valid_terms = set(TERMS.values())
+
         if term not in valid_terms:
             raise ValueError(f"Term must be one of {valid_terms}, got: {term}")
 
@@ -67,17 +73,11 @@ class Semester:
         year_str = code[:2]
         term_char = code[2]
 
-        term_map = {
-            "W": "Winter",
-            "S": "Spring",
-            "F": "Fall",
-        }
-
-        if term_char not in term_map:
+        if term_char not in TERMS:
             raise ValueError(f"Unknown semester term character: {term_char}")
 
         year = 2000 + int(year_str)
-        term = term_map[term_char]
+        term = TERMS[term_char]
 
         return cls(year=year, term=term)
 
