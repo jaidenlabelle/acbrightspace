@@ -1,4 +1,5 @@
 from datetime import datetime
+from os import name
 from typing import Any, List
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -11,6 +12,7 @@ from selenium.webdriver.remote.shadowroot import ShadowRoot
 from selenium.webdriver.remote.webelement import WebElement
 import pyotp
 import logging
+from acbrightspace.assignment import Assignment
 from acbrightspace.course import Course
 from acbrightspace.fraction import Fraction
 from acbrightspace.grade_item import GradeItem
@@ -184,6 +186,7 @@ class Brightspace:
 
         Args:
             org_unit_id (str): The organizational unit ID for the course for which to fetch grades.
+
         Returns:
             list[GradeItem]: A list of GradeItem objects representing the grades for the course.
         
@@ -203,6 +206,8 @@ class Brightspace:
         grades = []
         for index, row in enumerate(parsed_table):
             try:
+                row = row.cells
+
                 # Skip rows that don't have enough columns
                 if len(row) < 5:
                     logger.warning("Skipping row with insufficient columns: %s", row)
@@ -233,3 +238,83 @@ class Brightspace:
                 logger.error("Error processing row %d: %s", index, row, exc_info=error)
                 continue
         return grades
+    
+    def get_assignments(self, org_unit_id: str) -> list[Assignment]:
+        """Fetches the assignments for a specific course.
+
+        Args:
+            org_unit_id (str): The organizational unit ID for the course for which to fetch assignments.
+
+        Returns:
+            list[Any]: A list of Assignment objects representing the assignments for the course.
+        """
+
+        # Navigate to the course assignments page
+        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/dropbox/user/folders_list.d2l?ou={org_unit_id}&isprv=0")
+
+        # Wait for the assignments table to load
+        assignments_table = WebDriverWait(self.driver, 10).until(
+            expected_conditions.presence_of_element_located((By.ID, "z_a"))  # Replace with actual table ID
+        )
+
+        table = Table()
+        parsed_table = table.parse(assignments_table)
+
+        assignments = []
+        for index, row in enumerate(parsed_table):
+            try:
+                # Skip rows that don't have enough columns
+                if len(row.cells) < 4:
+                    logger.warning("Skipping row with insufficient columns: %s", row)
+                    continue
+
+                # Parse assignment details
+
+                # First column contains name, due date, and availability start and end dates
+                column_1 = row.cells[0]
+                assert isinstance(column_1, list)
+                assert len(column_1) == 3
+
+                # Split into individual variables
+                name = column_1[0]
+                due_at_str = column_1[1]
+
+                # Get availability start and date strings
+                # Handle cases where start date may be missing
+                starts_at = None
+                ends_at = None
+                if len(column_1) == 4:
+                    starts_at_str = row.element.find_elements(By.TAG_NAME, "li")[0].text 
+                    starts_at = datetime.strptime(starts_at_str.replace("Available on ", "").replace("Access restricted before availability starts.", "").strip(), "%b %d, %Y %I:%M %p") if "Available on " in starts_at_str else None
+
+                if len(column_1) >= 2:
+                    ends_at_str = row.element.find_elements(By.TAG_NAME, "li")[1].text
+                    ends_at = datetime.strptime(ends_at_str.replace("Available until ", "").replace("Access restricted after availability ends.", "").strip(), "%b %d, %Y %I:%M %p") if "Available until " in ends_at_str else None
+                # Due on Jan 23, 2026 11:59 PM
+                due_at = datetime.strptime(due_at_str.replace("Due on ", "").strip(), "%b %d, %Y %I:%M %p") if "Due on " in due_at_str else None
+
+                completion_status = row.cells[1] or None
+                score = row.cells[2] or None
+                evaluation_status = row.cells[3] or None
+
+                # Assert correct types
+                #assert isinstance(name, str)
+                #assert (isinstance(completion_status, str) or completion_status is None)
+                #assert (isinstance(evaluation_status, str) or evaluation_status is None)
+
+                assignment = Assignment(
+                    name=name,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    due_at=due_at,
+                    score=score,
+                    completion_status=completion_status,
+                    evaluation_status=evaluation_status
+                )
+
+                assignments.append(assignment)
+
+            except Exception as error:
+                logger.error("Error processing row %d: %s", index, row, exc_info=error)
+                continue
+        return assignments

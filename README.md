@@ -3,7 +3,8 @@ A simple Python libary for working with Algonquin College's Brightspace website.
 
 ## Features
 - Get all courses
-- Get assignment grades for each course
+- Get grades for each course
+- Get assignments for each course
 
 ## Installation
 Requirements: Python 3.14+.
@@ -39,6 +40,23 @@ for course in courses:
 # Get the grades for the course with org_unit_id = 683274.
 # When you open a course on Brightspace the url should look like ".../d2l/home/683274".
 grades = brightspace.get_grades("683274")
+```
+
+#### Example Output
+```
+[GradeItem(name='Lab3', points=<acbrightspace.fraction.Fraction object at 0x00000268F05DE3C0>, weight=<acbrightspace.fraction.Fraction object at 0x00000268F05F65D0>, comments=None), GradeItem(name='Lab4', points=<acbrightspace.fraction.Fraction object at 0x00000268F05F6210>, weight=<acbrightspace.fraction.Fraction object at 0x00000268F067C2B0>, comments=None), GradeItem(name='Lab5', points=<acbrightspace.fraction.Fraction object at 0x00000268F067C510>, weight=<acbrightspace.fraction.Fraction object at 0x00000268F0611B50>, comments=None)]
+```
+
+### Getting all Assignments from a Course
+```python
+# Get the assignments for the course with org_unit_id = 683274.
+# When you open a course on Brightspace the url should look like ".../d2l/home/683274".
+assignments = brightspace.get_assignments("683274")
+```
+
+#### Example Output
+```
+[Assignment(name='SBA EXAM Upload Section 21', starts_at=None, ends_at=None, due_at=datetime.datetime(2024, 11, 28, 13, 0), score=None, completion_status='Not Submitted', evaluation_status=None), Assignment(name='SBA Exam Upload Section 22', starts_at=None, ends_at=None, due_at=datetime.datetime(2024, 11, 28, 13, 0), score=None, completion_status='1 Submission, 1 File', evaluation_status=None)]
 ```
 
 ## How to Contribute
