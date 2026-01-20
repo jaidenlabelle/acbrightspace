@@ -1,0 +1,8 @@
+- Test table parsing
+  - Grade table
+  - Assignment table
+- Link assignments with grades in grade table
+- Is it possible to use credentials gained through selenium with requests?
+  - This would massively speed up functions and make testing easier
+  - This would also make results more reliable
+  - BS4 would still be faster then selenium? Easier to test with atleast

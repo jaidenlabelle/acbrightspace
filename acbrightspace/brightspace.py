@@ -1,15 +1,10 @@
-from datetime import datetime
-from os import name
-from typing import Any, List
-from selenium import webdriver
+from urllib import response
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.select import Select
 from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.remote.shadowroot import ShadowRoot
-from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.remote.webdriver import WebDriver
 import pyotp
 import logging
 from acbrightspace.assignment import Assignment
@@ -17,6 +12,8 @@ from acbrightspace.course import Course
 from acbrightspace.fraction import Fraction
 from acbrightspace.grade_item import GradeItem
 from acbrightspace.table import Table
+import pickle
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -27,33 +24,19 @@ class Brightspace:
     """Interface for interacting with Algonquin College Brightspace."""
     
     def __init__(self):
-        self.driver = webdriver.Chrome()
+        self.session = requests.Session()
 
-    def _get_nested_shadow_root(self, locators: list[tuple[str, str]], root: Any = None) -> ShadowRoot:
-        """Helper method to traverse nested shadow DOMs.
+    def _save_cookies(self, driver: WebDriver) -> None:
+        """Saves cookies from the WebDriver session to a file."""
+        with open("cookies.pkl", "wb") as cookie_file:
+            pickle.dump(driver.get_cookies(), cookie_file)
 
-        Args:
-            locators (list[tuple[str, str]]): List of (By, selector) tuples to traverse.
+    def _load_cookies(self) -> None:
+        """Load cookies from a saved file into the session."""
+        with open("cookies.pkl", "rb") as cookie_file:
+            self.session.cookies.update(pickle.load(cookie_file))
 
-        Returns:
-            The final shadow root WebElement.
-
-        Example:
-            >>> shadow_root = self._get_nested_shadow_root([
-            ...     (By.CSS_SELECTOR, "parent-element"),
-            ...     (By.CSS_SELECTOR, "child-element"),
-            ...     (By.CSS_SELECTOR, "target-element")
-            ... ])
-        """
-        root = root or self.driver
-        for locator in locators:
-            element = WebDriverWait(root, 10).until(
-                expected_conditions.presence_of_element_located(locator)
-            )
-            root = element.shadow_root
-        return root
-
-    def login(self, username: str, password: str, totp_secret: str) -> None:
+    def login(self, driver: WebDriver, username: str, password: str, totp_secret: str) -> None:
         """Logs into Brightspace with the provided credentials.
 
         Args:
@@ -70,10 +53,10 @@ class Brightspace:
 
         try:
             # Wait up to 10 seconds for elements to load
-            wait = WebDriverWait(self.driver, 10)
+            wait = WebDriverWait(driver, 10)
 
             # Navigate to the Brightspace login page
-            self.driver.get("https://brightspace.algonquincollege.com/")
+            driver.get("https://brightspace.algonquincollege.com/")
 
             # Enter username
             try:
@@ -125,6 +108,11 @@ class Brightspace:
                 wait.until(
                     expected_conditions.url_contains("brightspace.algonquincollege.com/d2l/home")
                 )
+                logger.info("Login successful.")
+                
+                # Save cookies after successful login
+                self._save_cookies(driver)
+                self.session.cookies.update({cookie['name']: cookie['value'] for cookie in driver.get_cookies()})
             except TimeoutException as error:
                 raise BrightspaceError("Login failed.") from error
         
@@ -133,188 +121,6 @@ class Brightspace:
         except Exception as error:
             raise BrightspaceError("Failed to log in to Brightspace.") from error
     
-    def get_courses(self) -> list[Course]:
-        """Fetches the list of courses for the logged-in student.
-
-        Returns:
-            list[Course]: A list of Course objects representing the student's courses.
-        """
-        # Navigate to the Brightspace home page
-        self.driver.get("https://brightspace.algonquincollege.com/d2l/home")
-
-        root = self._get_nested_shadow_root([
-            (By.CSS_SELECTOR, "d2l-my-courses"),
-            (By.CSS_SELECTOR, "d2l-my-courses-container"),
-        ])
-
-        tabs = WebDriverWait(root, 10).until(
-            expected_conditions.presence_of_all_elements_located((By.CSS_SELECTOR, "d2l-tab-panel"))
-        )
-
-        courses = []
-
-        for tab in tabs:
-            self.driver.execute_script(
-                "arguments[0].setAttribute('selected', '');", tab
-            )
-
-            inner_root = self._get_nested_shadow_root([
-                (By.CSS_SELECTOR, "d2l-my-courses-content"),
-                (By.CSS_SELECTOR, "d2l-my-courses-card-grid"),
-            ], tab)
-
-            cards = WebDriverWait(inner_root, 10).until(
-                expected_conditions.presence_of_all_elements_located((By.CSS_SELECTOR, "d2l-enrollment-card"))
-            )
-
-            for card in cards:
-                card = WebDriverWait(card.shadow_root, 10).until(
-                    expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "d2l-card"))
-                )
-                
-                print(card.get_attribute("text"))
-                course = Course.from_string(card.get_attribute("text"), org_unit_id=int(card.get_attribute("href").split('/')[-1]))
-                if course is not None:
-                    # Avoid duplicate course codes
-                    if all(existing_course.full_code != course.full_code for existing_course in courses):
-                        courses.append(course)
-
-        return courses
-
-    def get_grades(self, org_unit_id: str) -> list[GradeItem]:
-        """Fetches the grades for a specific course.
-
-        Args:
-            org_unit_id (str): The organizational unit ID for the course for which to fetch grades.
-
-        Returns:
-            list[GradeItem]: A list of GradeItem objects representing the grades for the course.
-        
-        """
-
-        # Navigate to the course grades page
-        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou={org_unit_id}")
-
-        # Wait for the grades table to load
-        grades_table = WebDriverWait(self.driver, 10).until(
-            expected_conditions.presence_of_element_located((By.ID, "z_f"))  # Replace with actual table ID
-        )
-
-        table = Table()
-        parsed_table = table.parse(grades_table)
-
-        grades = []
-        for index, row in enumerate(parsed_table):
-            try:
-                row = row.cells
-
-                # Skip rows that don't have enough columns
-                if len(row) < 5:
-                    logger.warning("Skipping row with insufficient columns: %s", row)
-                    continue
-
-                # Parse grade item details
-                name = row[0]
-                points = row[1] or None
-                weight = row[2] or None
-                comments = row[4] or None
-
-                # Assert correct types
-                assert isinstance(name, str)
-                assert isinstance(points, Fraction) or points is None
-                assert isinstance(weight, Fraction) or weight is None
-                assert isinstance(comments, str) or comments is None
-
-                grade_item = GradeItem(
-                    name=name,
-                    points=points,
-                    weight=weight,
-                    comments=comments
-                )
-
-                grades.append(grade_item)
-
-            except Exception as error:
-                logger.error("Error processing row %d: %s", index, row, exc_info=error)
-                continue
-        return grades
-    
-    def get_assignments(self, org_unit_id: str) -> list[Assignment]:
-        """Fetches the assignments for a specific course.
-
-        Args:
-            org_unit_id (str): The organizational unit ID for the course for which to fetch assignments.
-
-        Returns:
-            list[Any]: A list of Assignment objects representing the assignments for the course.
-        """
-
-        # Navigate to the course assignments page
-        self.driver.get(f"https://brightspace.algonquincollege.com/d2l/lms/dropbox/user/folders_list.d2l?ou={org_unit_id}&isprv=0")
-
-        # Wait for the assignments table to load
-        assignments_table = WebDriverWait(self.driver, 10).until(
-            expected_conditions.presence_of_element_located((By.ID, "z_a"))  # Replace with actual table ID
-        )
-
-        table = Table()
-        parsed_table = table.parse(assignments_table)
-
-        assignments = []
-        for index, row in enumerate(parsed_table):
-            try:
-                # Skip rows that don't have enough columns
-                if len(row.cells) < 4:
-                    logger.warning("Skipping row with insufficient columns: %s", row)
-                    continue
-
-                # Parse assignment details
-
-                # First column contains name, due date, and availability start and end dates
-                column_1 = row.cells[0]
-                assert isinstance(column_1, list)
-                assert len(column_1) == 3
-
-                # Split into individual variables
-                name = column_1[0]
-                due_at_str = column_1[1]
-
-                # Get availability start and date strings
-                # Handle cases where start date may be missing
-                starts_at = None
-                ends_at = None
-                if len(column_1) == 4:
-                    starts_at_str = row.element.find_elements(By.TAG_NAME, "li")[0].text 
-                    starts_at = datetime.strptime(starts_at_str.replace("Available on ", "").replace("Access restricted before availability starts.", "").strip(), "%b %d, %Y %I:%M %p") if "Available on " in starts_at_str else None
-
-                if len(column_1) >= 2:
-                    ends_at_str = row.element.find_elements(By.TAG_NAME, "li")[1].text
-                    ends_at = datetime.strptime(ends_at_str.replace("Available until ", "").replace("Access restricted after availability ends.", "").strip(), "%b %d, %Y %I:%M %p") if "Available until " in ends_at_str else None
-                # Due on Jan 23, 2026 11:59 PM
-                due_at = datetime.strptime(due_at_str.replace("Due on ", "").strip(), "%b %d, %Y %I:%M %p") if "Due on " in due_at_str else None
-
-                completion_status = row.cells[1] or None
-                score = row.cells[2] or None
-                evaluation_status = row.cells[3] or None
-
-                # Assert correct types
-                #assert isinstance(name, str)
-                #assert (isinstance(completion_status, str) or completion_status is None)
-                #assert (isinstance(evaluation_status, str) or evaluation_status is None)
-
-                assignment = Assignment(
-                    name=name,
-                    starts_at=starts_at,
-                    ends_at=ends_at,
-                    due_at=due_at,
-                    score=score,
-                    completion_status=completion_status,
-                    evaluation_status=evaluation_status
-                )
-
-                assignments.append(assignment)
-
-            except Exception as error:
-                logger.error("Error processing row %d: %s", index, row, exc_info=error)
-                continue
-        return assignments
+    def test_thing(self) -> None:
+        """A test method to test requests to Brightspace."""
+        r = self.session.get("https://brightspace.algonquincollege.com/d2l/lms/grades/my_grades/main.d2l?ou=847643")
