@@ -6,3 +6,4 @@
   - This would massively speed up functions and make testing easier
   - This would also make results more reliable
   - BS4 would still be faster then selenium? Easier to test with atleast
+- https://docs.valence.desire2learn.com/res/apiprop.html
